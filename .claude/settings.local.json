@@ -9,7 +9,11 @@
       "Bash(cmake --build build)",
       "Bash(make clean *)",
       "Bash(make)",
-      "Bash(./build/gguf-reader)"
+      "Bash(./build/gguf-reader)",
+      "Bash(./build/gguf-reader --hf no/such-model)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(./build/gguf-reader --hf bartowski/Meta-Llama-3.1-8B-Instruct-GGUF)",
+      "Bash(./build/gguf-reader -hf bartowski/Meta-Llama-3.1-8B-Instruct-GGUF)"
     ]
   }
 }

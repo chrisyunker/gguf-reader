@@ -53,7 +53,7 @@ cmake --build build
 ## Usage
 
 ```
-./build/gguf-reader <path-to-gguf-file> [--tokens] [--merges]
+./build/gguf-reader [--tokens] [--merges] [--hf <model-id>] <file.gguf>
 ```
 
 Default: outputs GGUF version, tensor count, metadata count, and all metadata key-value pairs to stdout. Arrays longer than 10 elements are truncated with a count shown.
@@ -61,3 +61,5 @@ Default: outputs GGUF version, tensor count, metadata count, and all metadata ke
 `--tokens`: scans metadata for the `tokenizer.ggml.tokens` key and prints each token on its own line (no truncation). Header and other metadata are suppressed.
 
 `--merges`: scans metadata for the `tokenizer.ggml.merges` key and prints each BPE merge rule on its own line (no truncation). Header and other metadata are suppressed.
+
+`--hf <model-id>`: resolves the model from the local HuggingFace cache (`~/.cache/huggingface/hub/`). Accepts a model ID in `org/model` form. Picks the most recently modified snapshot. If multiple `.gguf` files are found, lists them and exits so the user can pass the exact path directly.

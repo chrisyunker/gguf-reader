@@ -3,6 +3,10 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <dirent.h>
+#include <pwd.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static const uint32_t GGUF_MAGIC = 0x46554747; // "GGUF" little-endian
 
@@ -119,26 +123,101 @@ static void print_value(FILE* f, GgufValueType type) {
     printf("] (count=%llu)", (unsigned long long)count);
 }
 
+static std::string home_dir() {
+    const char* h = getenv("HOME");
+    if (h) return h;
+    struct passwd* pw = getpwuid(getuid());
+    return pw ? pw->pw_dir : "";
+}
+
+// Returns the resolved .gguf path for a HuggingFace model ID (e.g. "org/model").
+// Exits with an error message if the model or snapshot can't be found.
+// If multiple .gguf files exist, lists them and exits so the user can pick.
+static std::string resolve_hf_path(const char* model_id) {
+    // Build cache dir: ~/.cache/huggingface/hub/models--org--model
+    std::string repo;
+    for (const char* p = model_id; *p; p++)
+        repo += (*p == '/') ? "--" : std::string(1, *p);
+    std::string dir = home_dir() + "/.cache/huggingface/hub/models--" + repo + "/snapshots";
+
+    // Find snapshot subdirs, pick the most recently modified
+    DIR* d = opendir(dir.c_str());
+    if (!d) {
+        fprintf(stderr, "Error: no HuggingFace cache found for '%s'\n  (looked in %s)\n", model_id, dir.c_str());
+        exit(1);
+    }
+    std::string best_snap;
+    time_t best_mtime = 0;
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_name[0] == '.') continue;
+        std::string snap = dir + "/" + ent->d_name;
+        struct stat st;
+        if (stat(snap.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (st.st_mtime > best_mtime) { best_mtime = st.st_mtime; best_snap = snap; }
+        }
+    }
+    closedir(d);
+
+    if (best_snap.empty()) {
+        fprintf(stderr, "Error: no snapshots found for '%s'\n", model_id);
+        exit(1);
+    }
+
+    // Collect .gguf files in the snapshot dir
+    std::vector<std::string> gguf_files;
+    d = opendir(best_snap.c_str());
+    if (d) {
+        while ((ent = readdir(d)) != nullptr) {
+            std::string name = ent->d_name;
+            if (name.size() > 5 && name.substr(name.size() - 5) == ".gguf")
+                gguf_files.push_back(best_snap + "/" + name);
+        }
+        closedir(d);
+    }
+
+    if (gguf_files.empty()) {
+        fprintf(stderr, "Error: no .gguf files found for '%s'\n  (looked in %s)\n", model_id, best_snap.c_str());
+        exit(1);
+    }
+    if (gguf_files.size() == 1) return gguf_files[0];
+
+    // Multiple files: list them for the user to choose
+    fprintf(stderr, "Multiple .gguf files found for '%s':\n", model_id);
+    for (const auto& p : gguf_files) fprintf(stderr, "  %s\n", p.c_str());
+    fprintf(stderr, "Pass the full path directly to select one.\n");
+    exit(1);
+}
+
 int main(int argc, char* argv[]) {
-    if (argc < 2 || argc > 4) {
-        fprintf(stderr, "Usage: %s [--tokens] [--merges] <file.gguf>\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s [--tokens] [--merges] [--hf <model-id>] <file.gguf>\n", argv[0]);
         return 1;
     }
 
     bool dump_tokens = false;
     bool dump_merges = false;
-    const char* filename = nullptr;
+    const char* hf_model  = nullptr;
+    const char* filename  = nullptr;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--tokens") == 0)
             dump_tokens = true;
         else if (strcmp(argv[i], "--merges") == 0)
             dump_merges = true;
+        else if ((strcmp(argv[i], "--hf") == 0 || strcmp(argv[i], "-hf") == 0) && i + 1 < argc)
+            hf_model = argv[++i];
         else
             filename = argv[i];
     }
 
+    std::string resolved_path;
+    if (hf_model) {
+        resolved_path = resolve_hf_path(hf_model);
+        filename = resolved_path.c_str();
+    }
+
     if (!filename) {
-        fprintf(stderr, "Usage: %s [--tokens] [--merges] <file.gguf>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [--tokens] [--merges] [--hf <model-id>] <file.gguf>\n", argv[0]);
         return 1;
     }
 
