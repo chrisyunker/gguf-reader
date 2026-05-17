@@ -108,19 +108,27 @@ static void print_value(FILE* f, GgufValueType type) {
 
 int main(int argc, char* argv[]) {
     if (argc < 2 || argc > 3) {
-        fprintf(stderr, "Usage: %s <file.gguf> [--tokens]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [--tokens] <file.gguf>\n", argv[0]);
         return 1;
     }
 
-    bool dump_tokens = (argc == 3 && strcmp(argv[2], "--tokens") == 0);
-    if (argc == 3 && !dump_tokens) {
-        fprintf(stderr, "Usage: %s <file.gguf> [--tokens]\n", argv[0]);
+    bool dump_tokens = false;
+    const char* filename = nullptr;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--tokens") == 0)
+            dump_tokens = true;
+        else
+            filename = argv[i];
+    }
+
+    if (!filename) {
+        fprintf(stderr, "Usage: %s [--tokens] <file.gguf>\n", argv[0]);
         return 1;
     }
 
-    FILE* f = fopen(argv[1], "rb");
+    FILE* f = fopen(filename, "rb");
     if (!f) {
-        fprintf(stderr, "Error: cannot open file '%s'\n", argv[1]);
+        fprintf(stderr, "Error: cannot open file '%s'\n", filename);
         return 1;
     }
 
