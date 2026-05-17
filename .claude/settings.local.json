@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:ggml-org-ggml.mintlify.app)",
+      "WebFetch(domain:malcolm-mill.github.io)",
+      "Bash(cmake -S . -B build -DCMAKE_BUILD_TYPE=Release)",
+      "Bash(cmake --build build)"
+    ]
+  }
+}
