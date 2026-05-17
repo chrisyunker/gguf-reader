@@ -53,9 +53,11 @@ cmake --build build
 ## Usage
 
 ```
-./build/gguf-reader <path-to-gguf-file> [--tokens]
+./build/gguf-reader <path-to-gguf-file> [--tokens] [--merges]
 ```
 
 Default: outputs GGUF version, tensor count, metadata count, and all metadata key-value pairs to stdout. Arrays longer than 10 elements are truncated with a count shown.
 
 `--tokens`: scans metadata for the `tokenizer.ggml.tokens` key and prints each token on its own line (no truncation). Header and other metadata are suppressed.
+
+`--merges`: scans metadata for the `tokenizer.ggml.merges` key and prints each BPE merge rule on its own line (no truncation). Header and other metadata are suppressed.

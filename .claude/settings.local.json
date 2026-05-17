@@ -8,7 +8,8 @@
       "Bash(cmake -S . -B build -DCMAKE_BUILD_TYPE=Release)",
       "Bash(cmake --build build)",
       "Bash(make clean *)",
-      "Bash(make)"
+      "Bash(make)",
+      "Bash(./build/gguf-reader)"
     ]
   }
 }

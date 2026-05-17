@@ -120,22 +120,25 @@ static void print_value(FILE* f, GgufValueType type) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc < 2 || argc > 3) {
-        fprintf(stderr, "Usage: %s [--tokens] <file.gguf>\n", argv[0]);
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "Usage: %s [--tokens] [--merges] <file.gguf>\n", argv[0]);
         return 1;
     }
 
     bool dump_tokens = false;
+    bool dump_merges = false;
     const char* filename = nullptr;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--tokens") == 0)
             dump_tokens = true;
+        else if (strcmp(argv[i], "--merges") == 0)
+            dump_merges = true;
         else
             filename = argv[i];
     }
 
     if (!filename) {
-        fprintf(stderr, "Usage: %s [--tokens] <file.gguf>\n", argv[0]);
+        fprintf(stderr, "Usage: %s [--tokens] [--merges] <file.gguf>\n", argv[0]);
         return 1;
     }
 
@@ -156,7 +159,7 @@ int main(int argc, char* argv[]) {
     uint64_t tensor_count   = read_val<uint64_t>(f);
     uint64_t metadata_count = read_val<uint64_t>(f);
 
-    if (!dump_tokens) {
+    if (!dump_tokens && !dump_merges) {
         printf("GGUF version:   %u\n", version);
         printf("Tensor count:   %llu\n", (unsigned long long)tensor_count);
         printf("Metadata count: %llu\n\n", (unsigned long long)metadata_count);
@@ -202,6 +205,24 @@ int main(int argc, char* argv[]) {
                     } else {
                         skip_value(f, elem_type);
                     }
+                }
+                break;
+            }
+            skip_value(f, val_type);
+        }
+    } else if (dump_merges) {
+        for (uint64_t i = 0; i < metadata_count; i++) {
+            std::string key = read_string(f);
+            auto val_type   = read_val<GgufValueType>(f);
+            if (key == "tokenizer.ggml.merges" && val_type == ARRAY) {
+                auto elem_type = read_val<GgufValueType>(f);
+                uint64_t count = read_val<uint64_t>(f);
+                int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
+                for (uint64_t j = 0; j < count; j++) {
+                    if (elem_type == STRING)
+                        printf("%*llu: %s\n", width, (unsigned long long)j, read_string(f).c_str());
+                    else
+                        skip_value(f, elem_type);
                 }
                 break;
             }
