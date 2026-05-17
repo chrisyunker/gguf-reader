@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 static const uint32_t GGUF_MAGIC = 0x46554747; // "GGUF" little-endian
 
@@ -39,6 +40,18 @@ static std::string read_string(FILE* f) {
         exit(1);
     }
     return s;
+}
+
+static const char* token_type_name(int32_t t) {
+    switch (t) {
+        case 0: return "NORMAL";
+        case 1: return "UNKNOWN";
+        case 2: return "CONTROL";
+        case 3: return "USER_DEFINED";
+        case 4: return "UNUSED";
+        case 5: return "BYTE";
+        default: return "?";
+    }
 }
 
 // Forward declaration
@@ -149,25 +162,55 @@ int main(int argc, char* argv[]) {
         printf("Metadata count: %llu\n\n", (unsigned long long)metadata_count);
     }
 
-    for (uint64_t i = 0; i < metadata_count; i++) {
-        std::string key = read_string(f);
-        auto val_type   = read_val<GgufValueType>(f);
+    fpos_t after_header;
+    fgetpos(f, &after_header);
 
-        if (dump_tokens) {
-            if (key == "tokenizer.ggml.tokens" && val_type == ARRAY) {
+    if (dump_tokens) {
+        // First pass: collect token types
+        std::vector<int32_t> token_types;
+        for (uint64_t i = 0; i < metadata_count; i++) {
+            std::string key = read_string(f);
+            auto val_type   = read_val<GgufValueType>(f);
+            if (key == "tokenizer.ggml.token_type" && val_type == ARRAY) {
                 auto elem_type = read_val<GgufValueType>(f);
                 uint64_t count = read_val<uint64_t>(f);
-                int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
+                token_types.reserve(count);
                 for (uint64_t j = 0; j < count; j++) {
-                    if (elem_type == STRING)
-                        printf("%*llu: %s\n", width, (unsigned long long)j, read_string(f).c_str());
+                    if (elem_type == INT32)
+                        token_types.push_back(read_val<int32_t>(f));
                     else
                         skip_value(f, elem_type);
                 }
                 break;
             }
             skip_value(f, val_type);
-        } else {
+        }
+
+        // Second pass: print tokens with types
+        fsetpos(f, &after_header);
+        for (uint64_t i = 0; i < metadata_count; i++) {
+            std::string key = read_string(f);
+            auto val_type   = read_val<GgufValueType>(f);
+            if (key == "tokenizer.ggml.tokens" && val_type == ARRAY) {
+                auto elem_type = read_val<GgufValueType>(f);
+                uint64_t count = read_val<uint64_t>(f);
+                int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
+                for (uint64_t j = 0; j < count; j++) {
+                    if (elem_type == STRING) {
+                        const char* tname = j < token_types.size() ? token_type_name(token_types[j]) : "";
+                        printf("%*llu: %-12s %s\n", width, (unsigned long long)j, tname, read_string(f).c_str());
+                    } else {
+                        skip_value(f, elem_type);
+                    }
+                }
+                break;
+            }
+            skip_value(f, val_type);
+        }
+    } else {
+        for (uint64_t i = 0; i < metadata_count; i++) {
+            std::string key = read_string(f);
+            auto val_type   = read_val<GgufValueType>(f);
             printf("%-48s = ", key.c_str());
             print_value(f, val_type);
             printf("\n");
