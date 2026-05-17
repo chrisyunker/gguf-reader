@@ -107,8 +107,14 @@ static void print_value(FILE* f, GgufValueType type) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <file.gguf>\n", argv[0]);
+    if (argc < 2 || argc > 3) {
+        fprintf(stderr, "Usage: %s <file.gguf> [--tokens]\n", argv[0]);
+        return 1;
+    }
+
+    bool dump_tokens = (argc == 3 && strcmp(argv[2], "--tokens") == 0);
+    if (argc == 3 && !dump_tokens) {
+        fprintf(stderr, "Usage: %s <file.gguf> [--tokens]\n", argv[0]);
         return 1;
     }
 
@@ -129,16 +135,35 @@ int main(int argc, char* argv[]) {
     uint64_t tensor_count   = read_val<uint64_t>(f);
     uint64_t metadata_count = read_val<uint64_t>(f);
 
-    printf("GGUF version:   %u\n", version);
-    printf("Tensor count:   %llu\n", (unsigned long long)tensor_count);
-    printf("Metadata count: %llu\n\n", (unsigned long long)metadata_count);
+    if (!dump_tokens) {
+        printf("GGUF version:   %u\n", version);
+        printf("Tensor count:   %llu\n", (unsigned long long)tensor_count);
+        printf("Metadata count: %llu\n\n", (unsigned long long)metadata_count);
+    }
 
     for (uint64_t i = 0; i < metadata_count; i++) {
         std::string key = read_string(f);
         auto val_type   = read_val<GgufValueType>(f);
-        printf("%-48s = ", key.c_str());
-        print_value(f, val_type);
-        printf("\n");
+
+        if (dump_tokens) {
+            if (key == "tokenizer.ggml.tokens" && val_type == ARRAY) {
+                auto elem_type = read_val<GgufValueType>(f);
+                uint64_t count = read_val<uint64_t>(f);
+                int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
+                for (uint64_t j = 0; j < count; j++) {
+                    if (elem_type == STRING)
+                        printf("%*llu: %s\n", width, (unsigned long long)j, read_string(f).c_str());
+                    else
+                        skip_value(f, elem_type);
+                }
+                break;
+            }
+            skip_value(f, val_type);
+        } else {
+            printf("%-48s = ", key.c_str());
+            print_value(f, val_type);
+            printf("\n");
+        }
     }
 
     fclose(f);
