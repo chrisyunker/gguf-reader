@@ -58,6 +58,41 @@ static const char* token_type_name(int32_t t) {
     }
 }
 
+static const char* file_type_name(int32_t t) {
+    switch (t) {
+        case  0: return "F32";
+        case  1: return "F16";
+        case  2: return "Q4_0";
+        case  3: return "Q4_1";
+        case  6: return "Q5_0";
+        case  7: return "Q5_1";
+        case  8: return "Q8_0";
+        case  9: return "Q8_1";
+        case 10: return "Q2_K";
+        case 11: return "Q3_K";
+        case 12: return "Q4_K";
+        case 13: return "Q5_K";
+        case 14: return "Q6_K";
+        case 15: return "Q8_K";
+        case 16: return "IQ2_XXS";
+        case 17: return "IQ2_XS";
+        case 18: return "IQ3_XXS";
+        case 19: return "IQ1_S";
+        case 20: return "IQ4_NL";
+        case 21: return "IQ3_S";
+        case 22: return "IQ2_S";
+        case 23: return "IQ4_XS";
+        case 24: return "I8";
+        case 25: return "I16";
+        case 26: return "I32";
+        case 27: return "I64";
+        case 28: return "F64";
+        case 29: return "IQ1_M";
+        case 30: return "BF16";
+        default: return "?";
+    }
+}
+
 // Forward declaration
 static void skip_value(FILE* f, GgufValueType type);
 
@@ -312,7 +347,11 @@ int main(int argc, char* argv[]) {
             std::string key = read_string(f);
             auto val_type   = read_val<GgufValueType>(f);
             printf("%-48s = ", key.c_str());
-            print_value(f, val_type);
+            if (key == "general.file_type" && (val_type == INT32 || val_type == UINT32)) {
+                printf("%s", file_type_name((int32_t)read_val<uint32_t>(f)));
+            } else {
+                print_value(f, val_type);
+            }
             printf("\n");
         }
     }
