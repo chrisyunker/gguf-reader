@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 #include <dirent.h>
@@ -353,6 +355,43 @@ int main(int argc, char* argv[]) {
                 print_value(f, val_type);
             }
             printf("\n");
+        }
+
+        if (tensor_count > 0) {
+            std::map<std::string, uint64_t> type_counts;
+            std::map<std::string, uint64_t> shape_counts;
+            for (uint64_t i = 0; i < tensor_count; i++) {
+                read_string(f);                          // name
+                uint32_t n_dims = read_val<uint32_t>(f);
+                std::string shape = "[";
+                for (uint32_t d = 0; d < n_dims; d++) {
+                    uint64_t dim = read_val<uint64_t>(f);
+                    if (d > 0) shape += ", ";
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%llu", (unsigned long long)dim);
+                    shape += buf;
+                }
+                shape += "]";
+                uint32_t ttype = read_val<uint32_t>(f);
+                read_val<uint64_t>(f);                   // offset
+                type_counts[file_type_name((int32_t)ttype)]++;
+                shape_counts[shape]++;
+            }
+
+            auto make_sorted = [](const std::map<std::string, uint64_t>& m) {
+                std::vector<std::pair<uint64_t, std::string>> v;
+                for (const auto& kv : m) v.push_back({kv.second, kv.first});
+                std::sort(v.rbegin(), v.rend());
+                return v;
+            };
+
+            printf("\nTensor types:\n");
+            for (const auto& p : make_sorted(type_counts))
+                printf("  %-8s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
+
+            printf("\nTensor shapes:\n");
+            for (const auto& p : make_sorted(shape_counts))
+                printf("  %-24s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
         }
     }
 

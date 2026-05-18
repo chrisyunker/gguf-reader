@@ -56,7 +56,7 @@ cmake --build build
 ./build/gguf-reader [--tokens] [--merges] [--hf <model-id>] <file.gguf>
 ```
 
-Default: outputs GGUF version, tensor count, metadata count, and all metadata key-value pairs to stdout. Arrays longer than 10 elements are truncated with a count shown.
+Default: outputs GGUF version, tensor count, metadata count, all metadata key-value pairs, and a tensor type summary (count per type, sorted by count descending) to stdout. Arrays longer than 10 elements are truncated with a count shown.
 
 `--tokens`: scans metadata for the `tokenizer.ggml.tokens` key and prints each token on its own line (no truncation). Header and other metadata are suppressed.
 
