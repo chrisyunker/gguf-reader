@@ -95,9 +95,6 @@ static const char* file_type_name(int32_t t) {
     }
 }
 
-// Forward declaration
-static void skip_value(FILE* f, GgufValueType type);
-
 static void skip_value(FILE* f, GgufValueType type) {
     switch (type) {
         case UINT8:  case INT8:  case BOOL:    fseek(f, 1, SEEK_CUR); break;
@@ -165,6 +162,72 @@ static std::string home_dir() {
     if (h) return h;
     struct passwd* pw = getpwuid(getuid());
     return pw ? pw->pw_dir : "";
+}
+
+static void print_tokens(FILE* f, uint64_t metadata_count) {
+    fpos_t after_header;
+    fgetpos(f, &after_header);
+    std::vector<int32_t> token_types;
+    for (uint64_t i = 0; i < metadata_count; i++) {
+        std::string key = read_string(f);
+        auto val_type = read_val<GgufValueType>(f);
+        if (key == "tokenizer.ggml.token_type" && val_type == ARRAY) {
+            auto elem_type = read_val<GgufValueType>(f);
+            uint64_t count = read_val<uint64_t>(f);
+            token_types.reserve(count);
+            for (uint64_t j = 0; j < count; j++) {
+                if (elem_type == INT32) {
+                    token_types.push_back(read_val<int32_t>(f));
+                } else {
+                    skip_value(f, elem_type);
+                }
+            }
+            break;
+        }
+        skip_value(f, val_type);
+    }
+
+    fsetpos(f, &after_header);
+    for (uint64_t i = 0; i < metadata_count; i++) {
+        std::string key = read_string(f);
+        auto val_type = read_val<GgufValueType>(f);
+        if (key == "tokenizer.ggml.tokens" && val_type == ARRAY) {
+            auto elem_type = read_val<GgufValueType>(f);
+            uint64_t count = read_val<uint64_t>(f);
+            int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
+            for (uint64_t j = 0; j < count; j++) {
+                if (elem_type == STRING) {
+                    const char* tname = j < token_types.size() ? token_type_name(token_types[j]) : "";
+                    printf("%*llu: %-12s %s\n", width, (unsigned long long)j, tname, read_string(f).c_str());
+                } else {
+                    skip_value(f, elem_type);
+                }
+            }
+            break;
+        }
+        skip_value(f, val_type);
+    }
+}
+
+static void print_merges(FILE* f, uint64_t metadata_count) {
+    for (uint64_t i = 0; i < metadata_count; i++) {
+        std::string key = read_string(f);
+        auto val_type = read_val<GgufValueType>(f);
+        if (key == "tokenizer.ggml.merges" && val_type == ARRAY) {
+            auto elem_type = read_val<GgufValueType>(f);
+            uint64_t count = read_val<uint64_t>(f);
+            int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
+            for (uint64_t j = 0; j < count; j++) {
+                if (elem_type == STRING) {
+                    printf("%*llu: %s\n", width, (unsigned long long)j, read_string(f).c_str());
+                } else {
+                    skip_value(f, elem_type);
+                }
+            }
+            break;
+        }
+        skip_value(f, val_type);
+    }
 }
 
 // Returns the resolved .gguf path for a HuggingFace model ID (e.g. "org/model").
@@ -281,69 +344,10 @@ int main(int argc, char* argv[]) {
         printf("Metadata count: %llu\n\n", (unsigned long long)metadata_count);
     }
 
-    fpos_t after_header;
-    fgetpos(f, &after_header);
-
     if (dump_tokens) {
-        // First pass: collect token types
-        std::vector<int32_t> token_types;
-        for (uint64_t i = 0; i < metadata_count; i++) {
-            std::string key = read_string(f);
-            auto val_type   = read_val<GgufValueType>(f);
-            if (key == "tokenizer.ggml.token_type" && val_type == ARRAY) {
-                auto elem_type = read_val<GgufValueType>(f);
-                uint64_t count = read_val<uint64_t>(f);
-                token_types.reserve(count);
-                for (uint64_t j = 0; j < count; j++) {
-                    if (elem_type == INT32)
-                        token_types.push_back(read_val<int32_t>(f));
-                    else
-                        skip_value(f, elem_type);
-                }
-                break;
-            }
-            skip_value(f, val_type);
-        }
-
-        // Second pass: print tokens with types
-        fsetpos(f, &after_header);
-        for (uint64_t i = 0; i < metadata_count; i++) {
-            std::string key = read_string(f);
-            auto val_type   = read_val<GgufValueType>(f);
-            if (key == "tokenizer.ggml.tokens" && val_type == ARRAY) {
-                auto elem_type = read_val<GgufValueType>(f);
-                uint64_t count = read_val<uint64_t>(f);
-                int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
-                for (uint64_t j = 0; j < count; j++) {
-                    if (elem_type == STRING) {
-                        const char* tname = j < token_types.size() ? token_type_name(token_types[j]) : "";
-                        printf("%*llu: %-12s %s\n", width, (unsigned long long)j, tname, read_string(f).c_str());
-                    } else {
-                        skip_value(f, elem_type);
-                    }
-                }
-                break;
-            }
-            skip_value(f, val_type);
-        }
+        print_tokens(f, metadata_count);
     } else if (dump_merges) {
-        for (uint64_t i = 0; i < metadata_count; i++) {
-            std::string key = read_string(f);
-            auto val_type   = read_val<GgufValueType>(f);
-            if (key == "tokenizer.ggml.merges" && val_type == ARRAY) {
-                auto elem_type = read_val<GgufValueType>(f);
-                uint64_t count = read_val<uint64_t>(f);
-                int width = (count > 0) ? snprintf(nullptr, 0, "%llu", (unsigned long long)(count - 1)) : 1;
-                for (uint64_t j = 0; j < count; j++) {
-                    if (elem_type == STRING)
-                        printf("%*llu: %s\n", width, (unsigned long long)j, read_string(f).c_str());
-                    else
-                        skip_value(f, elem_type);
-                }
-                break;
-            }
-            skip_value(f, val_type);
-        }
+        print_merges(f, metadata_count);
     } else {
         for (uint64_t i = 0; i < metadata_count; i++) {
             std::string key = read_string(f);

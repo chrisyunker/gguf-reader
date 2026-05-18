@@ -13,6 +13,19 @@
       ],
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "build-debug"
-    }
+    },
+    {
+      "name": "Debug gguf-reader merges",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/debug/gguf-reader",
+      "args": [
+        "--hf",
+        "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+        "--merges"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build-debug"
+    },
   ]
 }
