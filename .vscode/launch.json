@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug gguf-reader tokens",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/debug/gguf-reader",
+      "args": [
+        "--hf",
+        "bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF",
+        "--tokens"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build-debug"
+    }
+  ]
+}
