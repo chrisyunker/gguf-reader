@@ -164,6 +164,65 @@ static std::string home_dir() {
     return pw ? pw->pw_dir : "";
 }
 
+// Returns the resolved .gguf path for a HuggingFace model ID (e.g. "org/model").
+// Exits with an error message if the model or snapshot can't be found.
+// If multiple .gguf files exist, lists them and exits so the user can pick.
+static std::string resolve_hf_path(const char* model_id) {
+    // Build cache dir: ~/.cache/huggingface/hub/models--org--model
+    std::string repo;
+    for (const char* p = model_id; *p; p++)
+        repo += (*p == '/') ? "--" : std::string(1, *p);
+    std::string dir = home_dir() + "/.cache/huggingface/hub/models--" + repo + "/snapshots";
+
+    // Find snapshot subdirs, pick the most recently modified
+    DIR* d = opendir(dir.c_str());
+    if (!d) {
+        fprintf(stderr, "Error: no HuggingFace cache found for '%s'\n  (looked in %s)\n", model_id, dir.c_str());
+        exit(1);
+    }
+    std::string best_snap;
+    time_t best_mtime = 0;
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_name[0] == '.') continue;
+        std::string snap = dir + "/" + ent->d_name;
+        struct stat st;
+        if (stat(snap.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+            if (st.st_mtime > best_mtime) { best_mtime = st.st_mtime; best_snap = snap; }
+        }
+    }
+    closedir(d);
+
+    if (best_snap.empty()) {
+        fprintf(stderr, "Error: no snapshots found for '%s'\n", model_id);
+        exit(1);
+    }
+
+    // Collect .gguf files in the snapshot dir
+    std::vector<std::string> gguf_files;
+    d = opendir(best_snap.c_str());
+    if (d) {
+        while ((ent = readdir(d)) != nullptr) {
+            std::string name = ent->d_name;
+            if (name.size() > 5 && name.substr(name.size() - 5) == ".gguf")
+                gguf_files.push_back(best_snap + "/" + name);
+        }
+        closedir(d);
+    }
+
+    if (gguf_files.empty()) {
+        fprintf(stderr, "Error: no .gguf files found for '%s'\n  (looked in %s)\n", model_id, best_snap.c_str());
+        exit(1);
+    }
+    if (gguf_files.size() == 1) return gguf_files[0];
+
+    // Multiple files: list them for the user to choose
+    fprintf(stderr, "Multiple .gguf files found for '%s':\n", model_id);
+    for (const auto& p : gguf_files) fprintf(stderr, "  %s\n", p.c_str());
+    fprintf(stderr, "Pass the full path directly to select one.\n");
+    exit(1);
+}
+
 static void print_tokens(FILE* f, uint64_t metadata_count) {
     fpos_t after_header;
     fgetpos(f, &after_header);
@@ -230,63 +289,60 @@ static void print_merges(FILE* f, uint64_t metadata_count) {
     }
 }
 
-// Returns the resolved .gguf path for a HuggingFace model ID (e.g. "org/model").
-// Exits with an error message if the model or snapshot can't be found.
-// If multiple .gguf files exist, lists them and exits so the user can pick.
-static std::string resolve_hf_path(const char* model_id) {
-    // Build cache dir: ~/.cache/huggingface/hub/models--org--model
-    std::string repo;
-    for (const char* p = model_id; *p; p++)
-        repo += (*p == '/') ? "--" : std::string(1, *p);
-    std::string dir = home_dir() + "/.cache/huggingface/hub/models--" + repo + "/snapshots";
+static void print_metadata(FILE* f, uint64_t metadata_count) {
+    for (uint64_t i = 0; i < metadata_count; i++) {
+        std::string key = read_string(f);
+        auto val_type = read_val<GgufValueType>(f);
 
-    // Find snapshot subdirs, pick the most recently modified
-    DIR* d = opendir(dir.c_str());
-    if (!d) {
-        fprintf(stderr, "Error: no HuggingFace cache found for '%s'\n  (looked in %s)\n", model_id, dir.c_str());
-        exit(1);
-    }
-    std::string best_snap;
-    time_t best_mtime = 0;
-    struct dirent* ent;
-    while ((ent = readdir(d)) != nullptr) {
-        if (ent->d_name[0] == '.') continue;
-        std::string snap = dir + "/" + ent->d_name;
-        struct stat st;
-        if (stat(snap.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
-            if (st.st_mtime > best_mtime) { best_mtime = st.st_mtime; best_snap = snap; }
+        printf("%-48s = ", key.c_str());
+        if (key == "general.file_type" && (val_type == INT32 || val_type == UINT32)) {
+            printf("%s", file_type_name((int32_t)read_val<uint32_t>(f)));
+        } else {
+            print_value(f, val_type);
         }
+        printf("\n");        
     }
-    closedir(d);
+}
 
-    if (best_snap.empty()) {
-        fprintf(stderr, "Error: no snapshots found for '%s'\n", model_id);
-        exit(1);
+static void print_tensors(FILE* f, uint64_t tensor_count) {
+    if (tensor_count == 0) {
+        return;
     }
 
-    // Collect .gguf files in the snapshot dir
-    std::vector<std::string> gguf_files;
-    d = opendir(best_snap.c_str());
-    if (d) {
-        while ((ent = readdir(d)) != nullptr) {
-            std::string name = ent->d_name;
-            if (name.size() > 5 && name.substr(name.size() - 5) == ".gguf")
-                gguf_files.push_back(best_snap + "/" + name);
+    std::map<std::string, uint64_t> type_counts;
+    std::map<std::string, uint64_t> shape_counts;
+    for (uint64_t i = 0; i < tensor_count; i++) {
+        read_string(f);                          // name
+        uint32_t n_dims = read_val<uint32_t>(f);
+        std::string shape = "[";
+        for (uint32_t d = 0; d < n_dims; d++) {
+            uint64_t dim = read_val<uint64_t>(f);
+            if (d > 0) shape += ", ";
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%llu", (unsigned long long)dim);
+            shape += buf;
         }
-        closedir(d);
+        shape += "]";
+        uint32_t ttype = read_val<uint32_t>(f);
+        read_val<uint64_t>(f);                   // offset
+        type_counts[file_type_name((int32_t)ttype)]++;
+        shape_counts[shape]++; 
     }
 
-    if (gguf_files.empty()) {
-        fprintf(stderr, "Error: no .gguf files found for '%s'\n  (looked in %s)\n", model_id, best_snap.c_str());
-        exit(1);
-    }
-    if (gguf_files.size() == 1) return gguf_files[0];
+    auto make_sorted = [](const std::map<std::string, uint64_t>& m) {
+        std::vector<std::pair<uint64_t, std::string>> v;
+        for (const auto& kv : m) v.push_back({kv.second, kv.first});
+        std::sort(v.rbegin(), v.rend());
+        return v;
+    };
 
-    // Multiple files: list them for the user to choose
-    fprintf(stderr, "Multiple .gguf files found for '%s':\n", model_id);
-    for (const auto& p : gguf_files) fprintf(stderr, "  %s\n", p.c_str());
-    fprintf(stderr, "Pass the full path directly to select one.\n");
-    exit(1);
+    printf("\nTensor types:\n");
+    for (const auto& p : make_sorted(type_counts))
+        printf("  %-8s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
+
+    printf("\nTensor shapes:\n");
+    for (const auto& p : make_sorted(shape_counts))
+        printf("  %-24s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
 }
 
 int main(int argc, char* argv[]) {
@@ -349,54 +405,8 @@ int main(int argc, char* argv[]) {
     } else if (dump_merges) {
         print_merges(f, metadata_count);
     } else {
-        for (uint64_t i = 0; i < metadata_count; i++) {
-            std::string key = read_string(f);
-            auto val_type   = read_val<GgufValueType>(f);
-            printf("%-48s = ", key.c_str());
-            if (key == "general.file_type" && (val_type == INT32 || val_type == UINT32)) {
-                printf("%s", file_type_name((int32_t)read_val<uint32_t>(f)));
-            } else {
-                print_value(f, val_type);
-            }
-            printf("\n");
-        }
-
-        if (tensor_count > 0) {
-            std::map<std::string, uint64_t> type_counts;
-            std::map<std::string, uint64_t> shape_counts;
-            for (uint64_t i = 0; i < tensor_count; i++) {
-                read_string(f);                          // name
-                uint32_t n_dims = read_val<uint32_t>(f);
-                std::string shape = "[";
-                for (uint32_t d = 0; d < n_dims; d++) {
-                    uint64_t dim = read_val<uint64_t>(f);
-                    if (d > 0) shape += ", ";
-                    char buf[32];
-                    snprintf(buf, sizeof(buf), "%llu", (unsigned long long)dim);
-                    shape += buf;
-                }
-                shape += "]";
-                uint32_t ttype = read_val<uint32_t>(f);
-                read_val<uint64_t>(f);                   // offset
-                type_counts[file_type_name((int32_t)ttype)]++;
-                shape_counts[shape]++;
-            }
-
-            auto make_sorted = [](const std::map<std::string, uint64_t>& m) {
-                std::vector<std::pair<uint64_t, std::string>> v;
-                for (const auto& kv : m) v.push_back({kv.second, kv.first});
-                std::sort(v.rbegin(), v.rend());
-                return v;
-            };
-
-            printf("\nTensor types:\n");
-            for (const auto& p : make_sorted(type_counts))
-                printf("  %-8s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
-
-            printf("\nTensor shapes:\n");
-            for (const auto& p : make_sorted(shape_counts))
-                printf("  %-24s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
-        }
+        print_metadata(f, metadata_count);
+        print_tensors(f, tensor_count);
     }
 
     fclose(f);
