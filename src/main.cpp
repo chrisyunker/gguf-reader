@@ -268,6 +268,10 @@ static void print_tokens(FILE* f, uint64_t metadata_count) {
     }
 }
 
+static void print_help(char* exec_name) {
+    fprintf(stderr, "Usage: %s [--tokens] [--merges] [--tensors] [--hf <model-id>] <file.gguf>\n", exec_name);
+}
+
 static void print_merges(FILE* f, uint64_t metadata_count) {
     for (uint64_t i = 0; i < metadata_count; i++) {
         std::string key = read_string(f);
@@ -308,11 +312,13 @@ static void print_tensors(FILE* f, uint64_t tensor_count) {
     if (tensor_count == 0) {
         return;
     }
+    printf("\nTensors:\n");
+    printf("-----------------------\n");
 
     std::map<std::string, uint64_t> type_counts;
-    std::map<std::string, uint64_t> shape_counts;
     for (uint64_t i = 0; i < tensor_count; i++) {
-        read_string(f);                          // name
+        std::string name = read_string(f);
+        printf("name: %s\n", name.c_str());      
         uint32_t n_dims = read_val<uint32_t>(f);
         std::string shape = "[";
         for (uint32_t d = 0; d < n_dims; d++) {
@@ -323,36 +329,26 @@ static void print_tensors(FILE* f, uint64_t tensor_count) {
             shape += buf;
         }
         shape += "]";
+        printf("shape: %s\n", shape.c_str());
+
         uint32_t ttype = read_val<uint32_t>(f);
         read_val<uint64_t>(f);                   // offset
-        type_counts[file_type_name((int32_t)ttype)]++;
-        shape_counts[shape]++; 
+
+        printf("type: %s\n", file_type_name((int32_t)ttype));
+
+        printf("-----------------------\n");
     }
-
-    auto make_sorted = [](const std::map<std::string, uint64_t>& m) {
-        std::vector<std::pair<uint64_t, std::string>> v;
-        for (const auto& kv : m) v.push_back({kv.second, kv.first});
-        std::sort(v.rbegin(), v.rend());
-        return v;
-    };
-
-    printf("\nTensor types:\n");
-    for (const auto& p : make_sorted(type_counts))
-        printf("  %-8s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
-
-    printf("\nTensor shapes:\n");
-    for (const auto& p : make_sorted(shape_counts))
-        printf("  %-24s: %llu\n", p.second.c_str(), (unsigned long long)p.first);
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s [--tokens] [--merges] [--hf <model-id>] <file.gguf>\n", argv[0]);
+        print_help(argv[0]);
         return 1;
     }
 
     bool dump_tokens = false;
     bool dump_merges = false;
+    bool dump_tensors = false;
     const char* hf_model  = nullptr;
     const char* filename  = nullptr;
     for (int i = 1; i < argc; i++) {
@@ -360,6 +356,8 @@ int main(int argc, char* argv[]) {
             dump_tokens = true;
         else if (strcmp(argv[i], "--merges") == 0)
             dump_merges = true;
+        else if (strcmp(argv[i], "--tensors") == 0)
+            dump_tensors = true;
         else if ((strcmp(argv[i], "--hf") == 0 || strcmp(argv[i], "-hf") == 0) && i + 1 < argc)
             hf_model = argv[++i];
         else
@@ -373,7 +371,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (!filename) {
-        fprintf(stderr, "Usage: %s [--tokens] [--merges] [--hf <model-id>] <file.gguf>\n", argv[0]);
+        print_help(argv[0]);
         return 1;
     }
 
@@ -406,7 +404,10 @@ int main(int argc, char* argv[]) {
         print_merges(f, metadata_count);
     } else {
         print_metadata(f, metadata_count);
-        print_tensors(f, tensor_count);
+        //print_tensor_summary(f, tensor_count);
+        if (dump_tensors) {
+            print_tensors(f, tensor_count);
+        }
     }
 
     fclose(f);
