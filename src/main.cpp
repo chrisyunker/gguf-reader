@@ -308,6 +308,33 @@ static void print_metadata(FILE* f, uint64_t metadata_count) {
     }
 }
 
+struct tensor {
+    std::string name;
+    std::string shape;
+    uint32_t ttype;
+    uint64_t offset;
+};
+
+static tensor extract_tensor(FILE* f) {
+    tensor t;
+    t.name = read_string(f);
+    uint32_t n_dims = read_val<uint32_t>(f);
+        t.shape = "[";
+        for (uint32_t d = 0; d < n_dims; d++) {
+            uint64_t dim = read_val<uint64_t>(f);
+            if (d > 0) t.shape += ", ";
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%llu", (unsigned long long) dim);
+            t.shape += buf;
+        }
+        t.shape += "]";
+
+        t.ttype = read_val<uint32_t>(f);
+        t.offset = read_val<uint64_t>(f);
+
+        return t;
+}
+
 static void print_tensors(FILE* f, uint64_t tensor_count) {
     if (tensor_count == 0) {
         return;
@@ -315,29 +342,40 @@ static void print_tensors(FILE* f, uint64_t tensor_count) {
     printf("\nTensors:\n");
     printf("-----------------------\n");
 
-    std::map<std::string, uint64_t> type_counts;
+    tensor prev_t;
     for (uint64_t i = 0; i < tensor_count; i++) {
-        std::string name = read_string(f);
-        printf("name: %s\n", name.c_str());      
-        uint32_t n_dims = read_val<uint32_t>(f);
-        std::string shape = "[";
-        for (uint32_t d = 0; d < n_dims; d++) {
-            uint64_t dim = read_val<uint64_t>(f);
-            if (d > 0) shape += ", ";
-            char buf[32];
-            snprintf(buf, sizeof(buf), "%llu", (unsigned long long)dim);
-            shape += buf;
+        tensor t = extract_tensor(f);
+
+        if (prev_t.name == "") {
+            prev_t = t;
+            continue;
         }
-        shape += "]";
-        printf("shape: %s\n", shape.c_str());
 
-        uint32_t ttype = read_val<uint32_t>(f);
-        read_val<uint64_t>(f);                   // offset
+        uint64_t size = t.offset - prev_t.offset;
 
-        printf("type: %s\n", file_type_name((int32_t)ttype));
-
+        printf("name: %s\n", prev_t.name.c_str());      
+        printf("shape: %s\n", prev_t.shape.c_str());
+        printf("type: %s\n", file_type_name((int32_t) prev_t.ttype));
+        printf("size: %llu\n", size);
         printf("-----------------------\n");
+        prev_t = t;
     }
+
+    // Calculate the final tensor size
+    const uint64_t alignment = 32;
+    uint64_t header_end = (uint64_t)ftell(f);
+    uint64_t tensor_data_start = (header_end + alignment - 1) / alignment * alignment;
+    fseek(f, 0, SEEK_END);
+    uint64_t file_size = (uint64_t)ftell(f);
+    uint64_t size = file_size - (tensor_data_start + prev_t.offset);
+
+    printf("name: %s\n", prev_t.name.c_str());
+    printf("shape: %s\n", prev_t.shape.c_str());
+    printf("type: %s\n", file_type_name((int32_t) prev_t.ttype));
+    printf("size: %llu\n", size);
+    printf("-----------------------\n");
+
+
 }
 
 int main(int argc, char* argv[]) {
