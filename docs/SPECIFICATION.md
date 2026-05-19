@@ -53,13 +53,15 @@ cmake --build build
 ## Usage
 
 ```
-./build/gguf-reader [--tokens] [--merges] [--hf <model-id>] <file.gguf>
+./build/gguf-reader [--tokens] [--merges] [--tensors] [--hf <model-id>] <file.gguf>
 ```
 
-Default: outputs GGUF version, tensor count, metadata count, all metadata key-value pairs, and a tensor type summary (count per type, sorted by count descending) to stdout. Arrays longer than 10 elements are truncated with a count shown.
+Default: outputs GGUF version, tensor count, metadata count, and all metadata key-value pairs to stdout. Arrays longer than 10 elements are truncated with a count shown.
 
-`--tokens`: scans metadata for the `tokenizer.ggml.tokens` key and prints each token on its own line (no truncation). Header and other metadata are suppressed.
+`--tokens`: scans metadata for the `tokenizer.ggml.tokens` key and prints each token with its index and type on its own line (no truncation). Header and other metadata are suppressed.
 
-`--merges`: scans metadata for the `tokenizer.ggml.merges` key and prints each BPE merge rule on its own line (no truncation). Header and other metadata are suppressed.
+`--merges`: scans metadata for the `tokenizer.ggml.merges` key and prints each BPE merge rule with its index on its own line (no truncation). Header and other metadata are suppressed.
+
+`--tensors`: prints full details for every tensor — name, shape, quantization type, and byte size. Output follows the metadata block. Cannot be combined with `--tokens` or `--merges`.
 
 `--hf <model-id>`: resolves the model from the local HuggingFace cache (`~/.cache/huggingface/hub/`). Accepts a model ID in `org/model` form. Picks the most recently modified snapshot. If multiple `.gguf` files are found, lists them and exits so the user can pass the exact path directly.

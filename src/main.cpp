@@ -103,7 +103,7 @@ static void skip_value(FILE* f, GgufValueType type) {
         case UINT64: case INT64: case FLOAT64: fseek(f, 8, SEEK_CUR); break;
         case STRING: {
             uint64_t len = read_val<uint64_t>(f);
-            fseek(f, (long)len, SEEK_CUR);
+            fseeko(f, (off_t)len, SEEK_CUR);
             break;
         }
         case ARRAY: {
@@ -147,7 +147,7 @@ static void print_value(FILE* f, GgufValueType type) {
     printf("[");
     for (uint64_t i = 0; i < count; i++) {
         if (i == MAX_PRINT) {
-            printf("... %llu more", (unsigned long long)(count - MAX_PRINT));
+            printf(", ... %llu more", (unsigned long long)(count - MAX_PRINT));
             for (uint64_t j = i; j < count; j++) skip_value(f, elem_type);
             break;
         }
@@ -300,7 +300,8 @@ static void print_metadata(FILE* f, uint64_t metadata_count) {
 
         printf("%-48s = ", key.c_str());
         if (key == "general.file_type" && (val_type == INT32 || val_type == UINT32)) {
-            printf("%s", file_type_name((int32_t)read_val<uint32_t>(f)));
+            int32_t ft = (val_type == INT32) ? (int32_t)read_val<int32_t>(f) : (int32_t)read_val<uint32_t>(f);
+            printf("%s", file_type_name(ft));
         } else {
             print_value(f, val_type);
         }
@@ -319,20 +320,18 @@ static tensor extract_tensor(FILE* f) {
     tensor t;
     t.name = read_string(f);
     uint32_t n_dims = read_val<uint32_t>(f);
-        t.shape = "[";
-        for (uint32_t d = 0; d < n_dims; d++) {
-            uint64_t dim = read_val<uint64_t>(f);
-            if (d > 0) t.shape += ", ";
-            char buf[32];
-            snprintf(buf, sizeof(buf), "%llu", (unsigned long long) dim);
-            t.shape += buf;
-        }
-        t.shape += "]";
-
-        t.ttype = read_val<uint32_t>(f);
-        t.offset = read_val<uint64_t>(f);
-
-        return t;
+    t.shape = "[";
+    for (uint32_t d = 0; d < n_dims; d++) {
+        uint64_t dim = read_val<uint64_t>(f);
+        if (d > 0) t.shape += ", ";
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%llu", (unsigned long long)dim);
+        t.shape += buf;
+    }
+    t.shape += "]";
+    t.ttype = read_val<uint32_t>(f);
+    t.offset = read_val<uint64_t>(f);
+    return t;
 }
 
 static void print_tensors(FILE* f, uint64_t tensor_count) {
@@ -436,13 +435,18 @@ int main(int argc, char* argv[]) {
         printf("Metadata count: %llu\n\n", (unsigned long long)metadata_count);
     }
 
+    if (dump_tensors && (dump_tokens || dump_merges)) {
+        fprintf(stderr, "Error: --tensors cannot be combined with --tokens or --merges\n");
+        fclose(f);
+        return 1;
+    }
+
     if (dump_tokens) {
         print_tokens(f, metadata_count);
     } else if (dump_merges) {
         print_merges(f, metadata_count);
     } else {
         print_metadata(f, metadata_count);
-        //print_tensor_summary(f, tensor_count);
         if (dump_tensors) {
             print_tensors(f, tensor_count);
         }
